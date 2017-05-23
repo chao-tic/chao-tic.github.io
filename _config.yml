@@ -1,2 +1,3 @@
 name: Chao-tic
 markdown: kramdown
+permalink: /blog/:year/:month/:day/:title
