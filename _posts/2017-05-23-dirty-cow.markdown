@@ -220,7 +220,7 @@ long __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 	/* ... snip ... */
 
 	do {
-        /* ... snip (find struct vma for the region to be accessd) ... */
+        /* ... snip ... */
 retry:
 		cond_resched(); // Yeah please rescheule me!!!
 		page = follow_page_mask(vma, start, foll_flags, &page_mask);
@@ -449,6 +449,7 @@ __do_page_fault(struct pt_regs *regs, unsigned long error_code,
     /* ... snip ... */
 
 	if (unlikely(access_error(error_code, vma))) {
+        /* Let's skip handle_mm_fault, here comes SIGSEGV!!! */
 		bad_area_access_error(regs, error_code, address, vma);
 		return;
 	}
