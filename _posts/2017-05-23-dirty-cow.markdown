@@ -427,6 +427,10 @@ You may want to ask: yeah, that sounds bad, but what are the odds of this happen
 
 Unfortunately, you might have guessed it. The answer is the window is actually pretty big, Dirty COW can be triggered pretty reliably even on a single core machine, owing no less to the fact that  `__get_user_pages` is explicitly asking the task scheduler to switch to another thread if necessary by calling `cond_resched` for each retry!
 
+See how the two threads race against each other:
+
+<img src="/assets/dirty-cow-threads.png" width="100%">
+
 ## Hang on, but why do we have that dirty COW page in the first place again?
 
 Astute readers may have noticed that, if we are to access the read-only file based mapping directly, a segmentation fault will be thrown directly in our faces. But why do we just get a dirty COWed page if we use `write` on `proc/self/mem`?
