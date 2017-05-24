@@ -532,4 +532,4 @@ That's it, the moral of the story is:
 ----
 
 [^1]: Go [watch](https://youtu.be/bg6-LVCHmGM?t=59m8s) legendary Bryan Cantrill's hilarious tirade against, among other things, the idiosyncrasies of Linux `MADV_DONTNEED` (The presentation was "aptly" titled "A crime against common sense").
-[^2]: For better or worse, kernel developers _really_ love their `goto`s.
+[^2]: For better or worse, Linux kernel developers _really_ love their `goto`s.
