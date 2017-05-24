@@ -21,6 +21,8 @@ The post is a little heavy on the technical side, it assumes the readers have so
 * [Page Fault](https://en.wikipedia.org/wiki/Page_fault)
 * [Copy-on-Write](https://en.wikipedia.org/wiki/Copy-on-write#Copy-on-write_in_virtual_memory_management)
 
+<!--break-->
+
 ## How to carry out the attack
 
 With that said, let's start from the beginning, first the code `open`s the file with read-only `O_RDONLY` flag, even though our intension is to ultimately "write" to it. This is to make the kernel happy as the file in question may not be writable for us the lowly unprivileged processes.
