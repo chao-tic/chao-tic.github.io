@@ -87,7 +87,7 @@ See the documentation straight from [the horse's mouth](http://man7.org/linux/ma
 >
 > Do not expect access in the near future.  (For the time being, the application is finished with the given range, so the kernel can free resources associated with it.)  Subsequent accesses of pages in this range will succeed, but will result either in reloading of the memory contents from  the  underlying  mapped file (see `mmap(2)`) or zero-fill-on-demand pages for mappings without an underlying file
 
-The behaviour of `MADV_DONTNEED` on Linux is actually somewhat controversial and not compliant to the POSIX standard[^1]. In fact as we will soon see it's precisely this non-standard behaviour that makes Dirty COW possible.
+The behaviour of `MADV_DONTNEED` on Linux is actually somewhat controversial and not compliant to the POSIX standard[^madv]. In fact as we will soon see it's precisely this non-standard behaviour that makes Dirty COW possible.
 
 Moving on to the other thread, here comes the meat of the attack:
 
@@ -193,7 +193,7 @@ free:
 
 The beginning of the function allocates a temporary memory buffer that serves as a sort of a data exchange centre between the calling process (i.e. the process performing the write) and the destination process (i.e. The process whose `/proc/self/mem` is being written). Though in this case the two processes are one and the same, the step is crucial for the more general use cases where the calling and destination processes are differernt, and one process has no direct access to another (hooray Virtual Memory).
 
-It then copies the content of the calling process's user buffer `buf` to the freshly allocated, but badly named exchange buffer `page` (Well yeah, it is a buffer whose size is one page...) using `copy_from_user`. 
+It then copies the content of the calling process's user buffer `buf` to the freshly allocated, but badly named exchange buffer `page`[^bad_name]  using `copy_from_user`. 
 
 With the preparation done, here comes to the real meat of `write` operation: [`access_remote_vm`](http://lxr.linux.no/linux+v4.8/mm/memory.c#L3854). As the name implies, It allows the kernel to read from or write to the virtual memory space of another (remote) process. It's the basis of all out-of-band memory access facilities (e.g. `ptrace(2)`, `/proc/self/mem`, ` process_vm_readv`, ` process_vm_writev`, etc...).
 
@@ -270,7 +270,7 @@ The last one is **exactly** what's happening to our `write(2)` to `proc/self/mem
 
 After the page fault handler successfully resolves the fault and not complaining anything untoward, the function is ready to attempt another retry hoping to get a "valid" `page` work with.
 
-Notice the `retry` label and the use of `goto` here[^2]? It may not be obvious, but as we will soon see, it is actually another important accomplice of this exploit. 
+Notice the `retry` label and the use of `goto` here[^goto]? It may not be obvious, but as we will soon see, it is actually another important accomplice of this exploit. 
 
 With that in mind, let's take a closer look at `faultin_page`:
 
@@ -440,7 +440,7 @@ Astute readers may have noticed that, if we are to access the read-only file bas
 
 The reason has to do with how the kernel handles page faults when they happen during in-process direct memory/pointer access and during out-of-band memory access using `ptrace` or `/proc/{pid}/mem`.
 
-Both cases will eventually invoke `handle_mm_fault` to resolve page faults. But unlike the latter that uses `faultin_page` to "simulate" page fault, the page faults caused by direct access are triggered by [MMU](https://en.wikipedia.org/wiki/Memory_management_unit), and will go through the [interrupt handler](http://lxr.linux.no/linux+v4.8/arch/x86/entry/entry_64.S#L935), then all the way to the platform dependent kernel function [`__do_page_fault`](http://lxr.linux.no/linux+v4.8/arch/x86/mm/fault.c#L1174)[^3].
+Both cases will eventually invoke `handle_mm_fault` to resolve page faults. But unlike the latter that uses `faultin_page` to "simulate" page fault, the page faults caused by direct access are triggered by [MMU](https://en.wikipedia.org/wiki/Memory_management_unit), and will go through the [interrupt handler](http://lxr.linux.no/linux+v4.8/arch/x86/entry/entry_64.S#L935), then all the way to the platform dependent kernel function [`__do_page_fault`](http://lxr.linux.no/linux+v4.8/arch/x86/mm/fault.c#L1174)[^underscores].
 
 In the case of directly writing to read-only memory region, the handler would detect the access violation in [`access_error`](http://lxr.linux.no/linux+*/arch/x86/mm/fault.c#L1111) and without hesitation signal the dreaded `SIGSEGV` in [`bad_area_access_error`](http://lxr.linux.no/linux+*/arch/x86/mm/fault.c#L930) before `handle_mm_fault` is reached:
 
@@ -467,7 +467,7 @@ Whereas `faultin_page` will begrudgingly take the access violation on the chin b
 
 Why would the kernel go to such lengths to provide this kind of out-of-band access? Why would the kernel sanction such an invasive way to have one program meddle with another process's supposedly sacred memory space?
 
-The short answer is that, yeah even though every process's memory space is sacred, privacy is important, blah, blah. There's still a need for _debuggers_ or some other investigative programs to have ways to peek and poke a remote process's data. It's for the greater good (Sounds familiar?)! How else can a debugger place break points and watch variables in your buggy programs?[^4]
+The short answer is that, yeah even though every process's memory space is sacred, privacy is important, blah, blah. There's still a need for _debuggers_ or some other investigative programs to have ways to peek and poke a remote process's data. It's for the greater good (Sounds familiar?)! How else can a debugger place break points and watch variables in your buggy programs?[^debug]
 
 ## The patch
 
@@ -541,7 +541,8 @@ That's it, the moral of the story is:
 
 ----
 
-[^1]: Go [watch](https://youtu.be/bg6-LVCHmGM?t=59m8s) legendary Bryan Cantrill's hilarious tirade against, among other things, the idiosyncrasies of Linux `MADV_DONTNEED` (The presentation was "aptly" titled "A crime against common sense").
-[^2]: For better or worse, Linux kernel developers _really_ love their `goto`s.
-[^3]: Tidbit: all important functions in kernel begin with two underscores [wink]
-[^4]: Even though many ISAs have their own hardware based debug facilities (x86 has [DR0...DR7](https://en.wikipedia.org/wiki/X86_debug_register)), their functionalities are too limited for what we expect from a debugger.
+[^madv]: Go [watch](https://youtu.be/bg6-LVCHmGM?t=59m8s) legendary Bryan Cantrill's hilarious tirade against, among other things, the idiosyncrasies of Linux `MADV_DONTNEED` (The presentation was "aptly" titled "A crime against common sense").
+[^bad_name]: Well yeah, it is a buffer whose size is one page...
+[^goto]: For better or worse, Linux kernel developers _really_ love their `goto`s.
+[^underscores]: Tidbit: all important functions in kernel begin with two underscores [wink]
+[^debug]: Even though many ISAs have their own hardware based debug facilities (x86 has [DR0...DR7](https://en.wikipedia.org/wiki/X86_debug_register)), their functionalities are too limited for what we expect from a debugger.
