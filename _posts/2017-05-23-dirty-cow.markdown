@@ -191,13 +191,13 @@ free:
 }
 ```
 
-The beginning of the function allocates a temporary memory buffer that serves as a sort of a data exchange centre between the calling process (i.e. the process performing the write) and the destination process (i.e. The process whose `/proc/self/mem` is being written). Though in this case the two processes are one and the same, the step is crucial for the more general use cases where the calling and destination processes are differernt, and one process has no direct access to another (hooray Virtual Memory).
+The beginning of the function allocates a temporary memory buffer that serves as a sort of a data exchange centre between the calling process (i.e. the process performing the write) and the destination process (i.e. The process whose `/proc/self/mem` is being written). Though in this case the two processes are one and the same, the step is crucial for the more general use cases where the calling and destination processes are different, and one process has no direct access to another (hooray Virtual Memory).
 
 It then copies the content of the calling process's user buffer `buf` to the freshly allocated, but badly named exchange buffer `page`[^bad_name]  using `copy_from_user`. 
 
-With the preparation done, here comes to the real meat of `write` operation: [`access_remote_vm`](http://lxr.linux.no/linux+v4.8/mm/memory.c#L3854). As the name implies, It allows the kernel to read from or write to the virtual memory space of another (remote) process. It's the basis of all out-of-band memory access facilities (e.g. `ptrace(2)`, `/proc/self/mem`, ` process_vm_readv`, ` process_vm_writev`, etc...).
+With the preparation done, here comes to the real meat of `write` operation: [`access_remote_vm`](http://lxr.linux.no/linux+v4.8/mm/memory.c#L3854). As the name implies, It allows the kernel to read from or write to the virtual memory space of another (remote) process. It's the basis of all out-of-band memory access facilities (e.g. `ptrace(2)`, `/proc/self/mem`, `process_vm_readv`, `process_vm_writev`, etc...).
 
-`access_remote_vm` calls several intermediate functions that would eventually land at [`__get_user_pages_locked(...)`](http://lxr.linux.no/linux+*/mm/gup.c#L728) in which it first translates the intention of this out-of-band access to a variable called `flags`, in this case the flags would consist of:
+`access_remote_vm` calls several intermediate functions that would eventually land at [`__get_user_pages_locked(...)`](http://lxr.linux.no/linux+*/mm/gup.c#L728) in which it first translates the intention of this out-of-band access to `flags`, in this case the flags would consist of:
 
     FOLL_TOUCH | FOLL_REMOTE | FOLL_GET | FOLL_WRITE | FOLL_FORCE
 
@@ -261,7 +261,7 @@ The code first attempts to locate the remote process's memory [page](https://en.
 
 There are several reasons why `follow_page_mask` returns `NULL`, here is a non-exhaustive list:
 
-* The address has not associated memory mapping, for example accessing `NULL` pointer.
+* The address has no associated memory mapping, for example accessing `NULL` pointer.
 * The memory mapping has been created, but because of [demand-paging](https://en.wikipedia.org/wiki/Demand_paging), the content has not yet been loaded in.
 * The page has been paged out to the original file or swap file.
 * The access semantics encoded in `foll_flags` violates the page's permission configuration (i.e. writing to a read-only mapping).
@@ -344,7 +344,7 @@ static int faultin_page(struct task_struct *tsk, struct vm_area_struct *vma,
 
 The first half of the function translates `foll_flags` to the corresponding `fault_flags` that the page fault handler `handle_mm_fault` can understand. `handle_mm_fault` is responsible for resolving the page fault so that the `__get_user_pages` can carry on with its execution.
 
-In this case, because the original memory mapping for the region we want to modify is _read-only_, `handle_mm_fault` will hornour its original permission configuration and create a new read-only (it's a read-only mapping after all) COW page (`do_wp_page`) for the address we want to write to, marking it _private_ as well as _dirty_, hence **Dirty COW**.
+In this case, because the original memory mapping for the region we want to modify is _read-only_, `handle_mm_fault` will honour its original permission configuration and create a new read-only (it's a read-only mapping after all) COW page (`do_wp_page`) for the address we want to write to, marking it _private_ as well as _dirty_, hence **Dirty COW**.
 
 The actual code that creates the COWed page is `do_wp_page` embedded deep in the handler, but the rough code flow can be found in the [official Dirty COW page](https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails):
 
@@ -401,7 +401,7 @@ Shortly after this `faultin_page`, `__get_user_pages` will do another retry in a
 
 The kernel has handed us the key to the privileged castle. With this page in hand, the commoner non-root program is now capable of modifying the root file!
 
-It's all because the kernel is lying here. In its subsequent retry after being told a dirty COW page was ready, it goes on to tell `follow_page_mask` and `handle_mm_fault` that only read-only access is needed. The two functions happily comply and return a `page` that's _best optimised for the job_. In this case, it returns a `page` that if we perform modification on it would get written back to original privileged file.
+It's all because the kernel is lying here. In its subsequent retry after being told a dirty COW page is ready, it goes on to tell `follow_page_mask` and `handle_mm_fault` that only read-only access is needed. The two functions happily comply and return a `page` that's _best optimised for the job_. In this case, it returns a `page` that if we perform modification on it would get written back to original privileged file.
 
 After getting hold of the `page`, `__get_user_pages` can finally skip the `faultin_page` call and return the `page` all the way to the `__access_remote_vm` for further processing.
 
@@ -447,17 +447,17 @@ In the case of directly writing to read-only memory region, the handler would de
 ```c
 static noinline void
 __do_page_fault(struct pt_regs *regs, unsigned long error_code,
-		unsigned long address)
+        unsigned long address)
 {
     /* ... snip ... */
 
-	if (unlikely(access_error(error_code, vma))) {
+    if (unlikely(access_error(error_code, vma))) {
         /* Let's skip handle_mm_fault, here comes SIGSEGV!!! */
-		bad_area_access_error(regs, error_code, address, vma);
-		return;
-	}
+        bad_area_access_error(regs, error_code, address, vma);
+        return;
+    }
 
-	fault = handle_mm_fault(mm, vma, address, flags);
+    fault = handle_mm_fault(mm, vma, address, flags);
 
     /* ... snip ... */
 }
