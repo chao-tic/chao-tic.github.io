@@ -544,4 +544,4 @@ That's it, the moral of the story is:
 [^1]: Go [watch](https://youtu.be/bg6-LVCHmGM?t=59m8s) legendary Bryan Cantrill's hilarious tirade against, among other things, the idiosyncrasies of Linux `MADV_DONTNEED` (The presentation was "aptly" titled "A crime against common sense").
 [^2]: For better or worse, Linux kernel developers _really_ love their `goto`s.
 [^3]: Tidbit: all important functions in kernel begin with two underscores [wink]
-[^4]: Even though each hardware platform has its own hardware based debug facilties (x86 has [DR0...DR7](https://en.wikipedia.org/wiki/X86_debug_register)), their functionalities are too limited for what we expect from a debugger.
+[^4]: Even though many ISAs have their own hardware based debug facilities (x86 has [DR0...DR7](https://en.wikipedia.org/wiki/X86_debug_register)), their functionalities are too limited for what we expect from a debugger.
