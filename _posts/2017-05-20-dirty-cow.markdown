@@ -84,9 +84,7 @@ See the decryption straight from [the horse's mouth](http://man7.org/linux/man-p
 >
 > Do not expect access in the near future.  (For the time being, the application is finished with the given range, so the kernel can free resources associated with it.)  Subsequent accesses of pages in this range will succeed, but will result either in reloading of the memory contents from  the  underlying  mapped file (see `mmap(2)`) or zero-fill-on-demand pages for mappings without an underlying file
 
-The behaviour of `MADV_DONTNEED` on Linux is actually somewhat controversial and not compliant to the POSIX standard, go [watch](https://youtu.be/bg6-LVCHmGM?t=59m8s) legendary Bryan Cantrill's hilarious tirade against, among other things, the idiosyncrasies of Linux `MADV_DONTNEED` (The presentation was "aptly" titled "A crime against common sense").
-
-In fact as we will soon see it's precisely this non-standard behaviour that makes Dirty COW possible.
+The behaviour of `MADV_DONTNEED` on Linux is actually somewhat controversial and not compliant to the POSIX standard[^1]. In fact as we will soon see it's precisely this non-standard behaviour that makes Dirty COW possible.
 
 Moving on to the other thread, here comes the meat of the attack:
 
@@ -268,7 +266,7 @@ The last one is **exactly** what's happening to our `write(2)` to `proc/self/mem
 
 After the page fault handler successfully resolves the fault and not complaining anything untoward, the function will attempt another retry hoping to get a "valid" `page` for further processing.
 
-Notice the `retry` label and the use of `goto` here[^1]? It may not have become apparent, but as we will soon see, it is actually another important accomplice of this exploit. 
+Notice the `retry` label and the use of `goto` here[^2]? It may not have become apparent, but as we will soon see, it is actually another important accomplice of this exploit. 
 
 With that in mind, let's take a closer look at `faultin_page` in its entirety:
 
@@ -533,4 +531,5 @@ That's it, the moral of the story is:
 
 ----
 
-[^1]: For better or worse, kernel developers _really_ love their `goto`s.
+[^1]: Go [watch](https://youtu.be/bg6-LVCHmGM?t=59m8s) legendary Bryan Cantrill's hilarious tirade against, among other things, the idiosyncrasies of Linux `MADV_DONTNEED` (The presentation was "aptly" titled "A crime against common sense").
+[^2]: For better or worse, kernel developers _really_ love their `goto`s.
