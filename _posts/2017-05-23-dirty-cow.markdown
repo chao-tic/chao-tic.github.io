@@ -438,9 +438,9 @@ See how the two threads race against each other:
 
 Astute readers may have noticed that, if we are to access the read-only file based mapping directly, a segmentation fault will be thrown directly in our faces. But why do we just get a dirty COWed page if we use `write` on `proc/self/mem`?
 
-The reason has to do with how the kernel handles page faults when they happen during direct memory access within the process and out-of-band memory access using `ptrace` or `/proc/{pid}/mem`.
+The reason has to do with how the kernel handles page faults when they happen during in-process direct memory/pointer access and during out-of-band memory access using `ptrace` or `/proc/{pid}/mem`.
 
-Both cases will eventually invoke `handle_mm_fault` to resolve page faults. But unlike the later that uses `faultin_page` to "simulate" page fault, the page faults caused by direct access are triggered by [MMU](https://en.wikipedia.org/wiki/Memory_management_unit), and will go through the [interrupt handler](http://lxr.linux.no/linux+v4.8/arch/x86/entry/entry_64.S#L935), then all the way to the platform dependent kernel function [`__do_page_fault`](http://lxr.linux.no/linux+v4.8/arch/x86/mm/fault.c#L1174)[^3].
+Both cases will eventually invoke `handle_mm_fault` to resolve page faults. But unlike the latter that uses `faultin_page` to "simulate" page fault, the page faults caused by direct access are triggered by [MMU](https://en.wikipedia.org/wiki/Memory_management_unit), and will go through the [interrupt handler](http://lxr.linux.no/linux+v4.8/arch/x86/entry/entry_64.S#L935), then all the way to the platform dependent kernel function [`__do_page_fault`](http://lxr.linux.no/linux+v4.8/arch/x86/mm/fault.c#L1174)[^3].
 
 In the case of directly writing to read-only memory region, the handler would detect the access violation in `access_error` and signal the dreaded `SIGSEGV` in `bad_area_access_error` before `handle_mm_fault` is reached:
 
