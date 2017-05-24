@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Dirty COW and why lying is bad even if you are Linux kernel"
-date: 2017-05-20
+date: 2017-05-23
 ---
 
 [Dirty COW (CVE-2016-5195)](https://dirtycow.ninja) is one of the most publicised local privilege escalation vulnerabilities in 2016, courtesy to its catchy name, cute logo, potential damages, and the fact that it was discovered in the wild by a researcher Phil Oester, meaning it was already under active use at the time of discovery.
