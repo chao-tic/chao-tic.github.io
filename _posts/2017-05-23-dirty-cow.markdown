@@ -149,6 +149,7 @@ static ssize_t mem_rw(struct file *file, char __user *buf, size_t count, loff_t 
     if (!mm)
         return 0;
 
+    /* allocate an exchange buffer */
     page = (char *)__get_free_page(GFP_TEMPORARY);
     if (!page)
         return -ENOMEM;
@@ -160,6 +161,7 @@ static ssize_t mem_rw(struct file *file, char __user *buf, size_t count, loff_t 
     while (count > 0) {
         int this_len = min_t(int, count, PAGE_SIZE);
 
+        /* copy user content to the exchange buffer */
         if (write && copy_from_user(page, buf, this_len)) {
             copied = -EFAULT;
             break;
@@ -225,7 +227,7 @@ long __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 	do {
         /* ... snip ... */
 retry:
-		cond_resched(); // Yeah please rescheule me!!!
+		cond_resched(); /* please rescheule me!!! */
 		page = follow_page_mask(vma, start, foll_flags, &page_mask);
 		if (!page) {
 			int ret;
@@ -457,6 +459,7 @@ __do_page_fault(struct pt_regs *regs, unsigned long error_code,
         return;
     }
 
+    /* I'm here... */
     fault = handle_mm_fault(mm, vma, address, flags);
 
     /* ... snip ... */
