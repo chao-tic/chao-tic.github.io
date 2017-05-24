@@ -442,7 +442,7 @@ The reason has to do with how the kernel handles page faults when they happen du
 
 Both cases will eventually invoke `handle_mm_fault` to resolve page faults. But unlike the latter that uses `faultin_page` to "simulate" page fault, the page faults caused by direct access are triggered by [MMU](https://en.wikipedia.org/wiki/Memory_management_unit), and will go through the [interrupt handler](http://lxr.linux.no/linux+v4.8/arch/x86/entry/entry_64.S#L935), then all the way to the platform dependent kernel function [`__do_page_fault`](http://lxr.linux.no/linux+v4.8/arch/x86/mm/fault.c#L1174)[^3].
 
-In the case of directly writing to read-only memory region, the handler would detect the access violation in `access_error` and signal the dreaded `SIGSEGV` in `bad_area_access_error` before `handle_mm_fault` is reached:
+In the case of directly writing to read-only memory region, the handler would detect the access violation in [`access_error`](http://lxr.linux.no/linux+*/arch/x86/mm/fault.c#L1111) and without hesitation signal the dreaded `SIGSEGV` in [`bad_area_access_error`](http://lxr.linux.no/linux+*/arch/x86/mm/fault.c#L930) before `handle_mm_fault` is reached:
 
 ```c
 static noinline void
