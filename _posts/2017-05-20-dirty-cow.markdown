@@ -264,7 +264,7 @@ There are several reasons why a page is not available, here is a non-exhaustive 
 
 The last one is **exactly** what's happening to our `write(2)` to `proc/self/mem`.
 
-After the page fault handler successfully resolves the fault and not complaining anything untoward, the function will attempt another retry hoping to get a "valid" `page` for further processing.
+After the page fault handler successfully resolves the fault and not complaining anything untoward, the function will attempt another retry hoping to get a "valid" `page` work with.
 
 Notice the `retry` label and the use of `goto` here[^2]? It may not have become apparent, but as we will soon see, it is actually another important accomplice of this exploit. 
 
@@ -340,7 +340,7 @@ static int faultin_page(struct task_struct *tsk, struct vm_area_struct *vma,
 
 The first half of the function translates `foll_flags` to the corresponding `fault_flags` that the page fault handler `handle_mm_fault` can understand. `handle_mm_fault` is responsible for resolving the page fault so that the `__get_user_pages` can carry on with its execution.
 
-In this case, because the original memory mapping for the region we want to modify is _read-only_, `handle_mm_fault` will hornour its original permission configuration and create a new read-only (it's a read-only mapping after all) COW page (`do_wp_page`) for the address we want to write to, then mark it dirty, hence **Dirty COW**.
+In this case, because the original memory mapping for the region we want to modify is _read-only_, `handle_mm_fault` will hornour its original permission configuration and create a new read-only (it's a read-only mapping after all) COW page (`do_wp_page`) for the address we want to write to, then mark it _private_ dirty, hence **Dirty COW**.
 
 The rough code flow that leads to the COWed page can be found in the [official Dirty COW page](https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails):
 
@@ -395,9 +395,9 @@ Shortly after this `faultin_page`, `__get_user_pages` will do another retry in a
 
 The kernel has handed us the key to the privileged castle. With this `page` in hand, the commoner non-root program is now capable of modifying the root file!
 
-It's all because the kernel is lying here. When performing retries after getting told a dirty COW page was ready, it goes on to tell `follow_page_mask` and `handle_mm_fault` that only read-only access is needed. The two functions happily comply and return a `page` that's best optimised for the job. In this case, it returns a `page` that if we perform modification on it would get written back to original privileged file.
+It's all because the kernel is lying here. In its subsequent retry after being told a dirty COW page was ready, it goes on to tell `follow_page_mask` and `handle_mm_fault` that only read-only access is needed. The two functions happily comply and return a `page` that's best optimised for the job. In this case, it returns a `page` that if we perform modification on it would get written back to original privileged file.
 
-With the `page` safely in hand, `__get_user_pages` can finally skip the `faultin_page` call and return the `page` all the way to the `__access_remote_vm` for further processing.
+After getting hold of the `page`, `__get_user_pages` can finally skip the `faultin_page` call and return the `page` all the way to the `__access_remote_vm` for further processing.
 
 ## The massacre
 
