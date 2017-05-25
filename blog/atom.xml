@@ -21,11 +21,13 @@ layout: null
 			<updated>{{ post.date | date_to_xmlschema }}</updated>
 			<id>http://chao-tic.github.io{{ post.id }}</id>
 			<content type="html">
-				{{ post.content | split:'<!--break-->' | first | xml_escape }}
 				{% if post.content contains '<!--break-->' %}
+					{{ post.content | split:'<!--break-->' | first | xml_escape }}
 					&lt;a href=&quot;{{ post.url }}&quot;&gt;read more&lt;/a&gt;
+				{% else %}
+					{{ post.excerpt | xml_escape }}
 				{% endif %}
-		</content>
+			</content>
 		</entry>
 	{% endfor %}
 
