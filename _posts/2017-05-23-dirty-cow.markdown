@@ -434,7 +434,7 @@ Unfortunately, you might have guessed it. The answer is the window is actually p
 
 See how the two threads race against each other:
 
-<img src="/assets/dirty-cow-threads.png" width="100%">
+<img src="/assets/dirty-cow-threads.png" style="width:90%;max-width:800px;">
 
 ## Hang on, but why do we have that dirty COW page in the first place again?
 
