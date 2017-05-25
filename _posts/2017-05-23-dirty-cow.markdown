@@ -13,7 +13,7 @@ There have been plenty of articles and blog posts about the exploit, but none of
 
 The following analysis is based on [this attack POC](https://github.com/dirtycow/dirtycow.github.io/blob/master/dirtyc0w.c), although the idea applies to all other similar attacks.
 
-The sample code is fairly short for an exploit, the important parts are the two threads: one calling `write(2)` on `/proc/self/mem`, and the other calling `madvice(MADV_DONTNEED)`. By having these two threads race against each other, a window of opportunity is revealed for the `write(2)` to push modification directly to the underlying memory mapped file even if said file is not allowed to be written by the attacking process, aka privilege escalation.
+The sample code is fairly short for an exploit, the important parts are the two threads: one calling [`write(2)`](http://man7.org/linux/man-pages/man2/write.2.html) on `/proc/self/mem`, and the other calling `madvice(MADV_DONTNEED)`. By having these two threads race against each other, a window of opportunity is revealed for the `write(2)` to push modification directly to the underlying memory mapped file even if said file is not allowed to be written by the attacking process, aka privilege escalation.
 
 The post is a little heavy on the technical side, it assumes the readers have some basic understanding of the following concepts:
 
@@ -28,7 +28,7 @@ The post is a little heavy on the technical side, it assumes the readers have so
 
 With that said, let's start from the beginning, first the code `open`s the file with read-only `O_RDONLY` flag, even though our intension is to ultimately "write" to it. This is to make the kernel happy as the file in question may not be writable for us the lowly unprivileged processes.
 
-After successfully getting its hand on the file descriptor, it promptly `mmap`s the file:
+After successfully getting its hand on the file descriptor, it promptly [`mmap`](http://man7.org/linux/man-pages/man2/mmap.2.html)s the file:
 
 ```c
     f=open(argv[1],O_RDONLY);
