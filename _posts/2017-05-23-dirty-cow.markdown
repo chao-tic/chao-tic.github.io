@@ -1,7 +1,7 @@
 ---
 layout: post
 comments: true
-title: "Dirty COW and why lying is bad even if you are Linux kernel"
+title: "Dirty COW and why lying is bad even if you are the Linux kernel"
 date: 2017-05-24
 ---
 
