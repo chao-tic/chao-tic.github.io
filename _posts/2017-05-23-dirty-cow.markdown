@@ -48,7 +48,7 @@ After successfully getting its hand on the file descriptor, it promptly [`mmap`]
     map=mmap(NULL,st.st_size,PROT_READ,MAP_PRIVATE,f,0);
 ```
 
-The invocation of `mmap` creates a file backed read-only memory mapping in the process's virtual address space. This is managed via a kernel object called [`struct vm_area_struct`](http://lxr.linux.no/linux+v4.8/include/linux/mm_types.h#L300) (Virtual Memory Area), which carries information such as the underlying file descriptor backing the mapping, read/write permission for the mapped pages etc...
+The invocation of `mmap` creates a file backed read-only memory mapping in the process's virtual address space. This is managed via a kernel object called [`struct vm_area_struct`](http://lxr.linux.no/linux+v4.8/include/linux/mm_types.h#L300) (Virtual Memory Area), which carries information such as the underlying [file description](http://lxr.linux.no/linux+v4.8/include/linux/mm_types.h#L351) backing the mapping, read/write permission for the mapped pages etc...
 
 Then two racing threads are created, one to perform `madvice`, the other to call `write`.
 
