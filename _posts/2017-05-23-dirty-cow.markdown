@@ -470,7 +470,7 @@ Whereas `faultin_page` will begrudgingly take the access violation on the chin b
 
 Why would the kernel go to such lengths to provide this kind of out-of-band access? Why would the kernel sanction such an invasive way to have one program meddle with another process's supposedly sacred memory space?
 
-The short answer is that, yeah even though every process's memory space is sacred, privacy is important, blah, blah. There's still a need for _debuggers_ or some other investigative programs to have ways to peek and poke a remote process's data. It's for the greater good (Sounds familiar?)! How else can a debugger place break points and watch variables in your buggy programs?[^debug]
+The short answer is that, yeah even though every process's memory space is sacred, privacy is important, blah, blah. There's still a need for _debuggers_ or some other investigative programs to have ways to peek and poke a remote process's data. It's for the greater good! Or how else can a debugger place break points and watch variables in your buggy programs?[^debug]
 
 ## The patch
 
