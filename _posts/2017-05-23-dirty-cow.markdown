@@ -197,7 +197,7 @@ The beginning of the function allocates a temporary memory buffer that serves as
 
 It then copies the content of the calling process's user buffer `buf` to the freshly allocated, but badly named exchange buffer `page`[^bad_name]  using `copy_from_user`. 
 
-With the preparation done, here comes to the real meat of `write` operation: [`access_remote_vm`](http://lxr.linux.no/linux+v4.8/mm/memory.c#L3854). As the name implies, It allows the kernel to read from or write to the virtual memory space of another (remote) process. It's the basis of all out-of-band memory access facilities (e.g. `ptrace(2)`, `/proc/self/mem`, `process_vm_readv`, `process_vm_writev`, etc...).
+With the preparation done, here comes the real meat of `write` operation: [`access_remote_vm`](http://lxr.linux.no/linux+v4.8/mm/memory.c#L3854). As the name implies, It allows the kernel to read from or write to the virtual memory space of another (remote) process. It's the basis of all out-of-band memory access facilities (e.g. `ptrace(2)`, `/proc/self/mem`, `process_vm_readv`, `process_vm_writev`, etc...).
 
 `access_remote_vm` calls several intermediate functions that would eventually land at [`__get_user_pages_locked(...)`](http://lxr.linux.no/linux+*/mm/gup.c#L728) in which it first translates the intention of this out-of-band access to `flags`, in this case the flags would consist of:
 
@@ -270,7 +270,7 @@ There are several reasons why `follow_page_mask` returns `NULL`, here is a non-e
 
 The last one is **exactly** what's happening to our `write(2)` to `proc/self/mem`.
 
-After the page fault handler successfully resolves the fault and not complaining anything untoward, the function is ready to attempt another retry hoping to get a "valid" `page` work with.
+The genreal idea is that if the page fault handler can successfully resolve the fault and not complaining anything untoward, the function would then attempt another retry hoping to get a "valid" `page` to work with.
 
 Notice the `retry` label and the use of `goto` here[^goto]? It may not be obvious, but as we will soon see, it is actually another important accomplice of this exploit. 
 
@@ -344,9 +344,9 @@ static int faultin_page(struct task_struct *tsk, struct vm_area_struct *vma,
 }
 ```
 
-The first half of the function translates `foll_flags` to the corresponding `fault_flags` that the page fault handler `handle_mm_fault` can understand. `handle_mm_fault` is responsible for resolving the page fault so that the `__get_user_pages` can carry on with its execution.
+The first half of the function translates `foll_flags` to the corresponding `fault_flags` that the page fault handler `handle_mm_fault` can understand. `handle_mm_fault` is responsible for resolving page faults so that the `__get_user_pages` can carry on with its execution.
 
-In this case, because the original memory mapping for the region we want to modify is _read-only_, `handle_mm_fault` will honour its original permission configuration and create a new read-only (it's a read-only mapping after all) COW page (`do_wp_page`) for the address we want to write to, marking it _private_ as well as _dirty_, hence **Dirty COW**.
+In this case, because the original memory mapping for the region we want to modify is _read-only_, `handle_mm_fault` will honour its original permission configuration and create a new read-only (it's a read-only mapping after all) [COW page](https://en.wikipedia.org/wiki/Copy-on-write) (`do_wp_page`) for the address we want to write to, marking it _private_ as well as _dirty_, hence **Dirty COW**.
 
 The actual code that creates the COWed page is `do_wp_page` embedded deep in the handler, but the rough code flow can be found in the [official Dirty COW page](https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails):
 
@@ -364,7 +364,7 @@ faultin_page
           ret = VM_FAULT_WRITE
 ```
 
-Now let's turn our attention back to the end of `faultin_page`, here it does something that truly makes the exploit possible right before it returns:
+Now let's turn our attention back to the end of `faultin_page`, right before the function returns, it does something that truly makes the exploit possible:
 
 ```c
 	/*
