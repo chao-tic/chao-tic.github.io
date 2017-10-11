@@ -13,7 +13,7 @@ There have been plenty of articles and blog posts about the exploit, but none of
 
 The following analysis is based on [this attack POC](https://github.com/dirtycow/dirtycow.github.io/blob/master/dirtyc0w.c), although the idea applies to all other similar attacks.
 
-The sample code is fairly short for an exploit, the important parts are the two threads: one calling [`write(2)`](http://man7.org/linux/man-pages/man2/write.2.html) on `/proc/self/mem`, and the other calling `madvice(MADV_DONTNEED)`. By having these two threads race against each other, a window of opportunity is revealed for the `write(2)` to push modification directly to the underlying memory mapped file even if said file is not allowed to be written by the attacking process, aka privilege escalation.
+The sample code is fairly short for an exploit, the important parts are the two threads: one calling [`write(2)`](http://man7.org/linux/man-pages/man2/write.2.html) on `/proc/self/mem`, and the other calling `madvise(MADV_DONTNEED)`. By having these two threads race against each other, a window of opportunity is revealed for the `write(2)` to push modification directly to the underlying memory mapped file even if said file is not allowed to be written by the attacking process, aka privilege escalation.
 
 The post is a little heavy on the technical side, it assumes the readers have some basic understanding of the following concepts:
 
@@ -50,14 +50,14 @@ After successfully getting its hand on the file descriptor, it promptly [`mmap`]
 
 The invocation of `mmap` creates a file backed read-only memory mapping in the process's virtual address space. This is managed via a kernel object called [`struct vm_area_struct`](http://lxr.linux.no/linux+v4.8/include/linux/mm_types.h#L300) (Virtual Memory Area), which carries information such as the underlying [file description](http://lxr.linux.no/linux+v4.8/include/linux/mm_types.h#L351) backing the mapping, read/write permission for the mapped pages etc...
 
-Then two racing threads are created, one to perform `madvice`, the other to call `write`.
+Then two racing threads are created, one to perform `madvise`, the other to call `write`.
 
 ```c
     pthread_create(&pth1,NULL,madviseThread,argv[1]);
     pthread_create(&pth2,NULL,procselfmemThread,argv[2]);
 ```
 
-Let's first take a look at what the `madvice` thread does:
+Let's first take a look at what the `madvise` thread does:
 
 ```c
 void *madviseThread(void *arg)
@@ -79,7 +79,7 @@ You have to race madvise(MADV_DONTNEED) :: https://access.redhat.com/security/vu
 
 ```
 
-Essentially what `madvice(MADV_DONTNEED)` does is to purge the physical memory that's managed by the mapping. In the case of COWed page, said page will be cleared after the call. The next time when the user attempts to access the memory region again, the pristine content will be reloaded from the disk (or page cache) for the file backed mappings or filled with zeros for anonymous heap memory. 
+Essentially what `madvise(MADV_DONTNEED)` does is to purge the physical memory that's managed by the mapping. In the case of COWed page, said page will be cleared after the call. The next time when the user attempts to access the memory region again, the pristine content will be reloaded from the disk (or page cache) for the file backed mappings or filled with zeros for anonymous heap memory. 
 
 See the documentation straight from [the horse's mouth](http://man7.org/linux/man-pages/man2/madvise.2.html):
 
@@ -393,9 +393,9 @@ At this point, if your spidey sense is tingling, and the removal of `FOLL_WRITE`
 
 Here comes the crux of the problem. By removing the write semantics from the `foll_flags`, `follow_page_mask` in the next retry will treat the access as read-only despite the goal is to write to it.
 
-Now comes the kicker. _What if, at the same time, the COWed page is dropped by another thread calling `madvice(MADV_DONTNEED)`?_
+Now comes the kicker. _What if, at the same time, the COWed page is dropped by another thread calling `madvise(MADV_DONTNEED)`?_
 
-Immediately, nothing disastrous would happen. `follow_page_mask` would still fail to locate the page for the address due to the absence of the now purged COWed page thanks to `madvice`. But what happens next in `faultin_page` is interesting.
+Immediately, nothing disastrous would happen. `follow_page_mask` would still fail to locate the page for the address due to the absence of the now purged COWed page thanks to `madvise`. But what happens next in `faultin_page` is interesting.
 
 Because this time around `foll_flags` doesn't contain `FOLL_WRITE`, so instead of creating a dirty COW page, `handle_mm_fault` will simply pull out the page that is **directly mapped to the underlying privileged file** from the page cache! Why such directness? Well, because the almighty kernel is only asking for _read_ access (remember `FOLL_WRITE` has been removed), why bother creating another copy of the page, if the kernel already promises not to modify it? Kernel won't lie to us minions right?
 
