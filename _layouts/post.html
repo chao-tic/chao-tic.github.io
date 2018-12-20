@@ -4,6 +4,12 @@ layout: default
 <h1>{{ page.title }}</h1>
 <p class="meta">{{ page.date | date_to_string }}</p>
 
+{% if page.toc %}
+<div class="toc">
+  {% include toc.html html=content %}
+</div>
+{% endif %}
+
 <div class="post">
   {{ content }}
 </div>
