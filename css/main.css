@@ -39,12 +39,31 @@ ul {
     font-size: 1.3em;
 }
 
+ul ul, ol ul {
+    list-style-type: circle;
+    font-size: 1.0em;
+}
+
+
 ul.posts {
     margin: 20px auto 40px;
     font-size: 1.5em;
 }
 
 ul.posts li {
+    list-style: none;
+}
+
+ol {
+    font-size: 1.3em;
+}
+
+ol.posts {
+    margin: 20px auto 40px;
+    font-size: 1.5em;
+}
+
+ol.posts li {
     list-style: none;
 }
 
