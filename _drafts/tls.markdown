@@ -58,7 +58,7 @@ It looks like, at least in this case, disassembling the code gives us more myste
 
 While some other CPU architectures have dedicated register to hold thread specific context (whatever that means), x86 enjoys no such luxury. Infamously only having small number of general purpose registers, x86 requires programmers to be very prudent when it comes to planning register uses.
 
-With the rise of multithreaded programming, people saw an opportunity in repurposing user defined segment registers and started to use them as thread register.
+Intel introduced FS and GS as user defined segment registers without stipulating what they are for. But later with the rise of multithreaded programming, people saw an opportunity in repurposing FS and GS and started to use them as thread register.
 
 Note that this is x86 specific, and we won't go into the details of [memory segmentation](https://en.wikipedia.org/wiki/X86_memory_segmentation), but suffice to say that on x86-64, non-kernel programs make use of FS or GS segment register to store TLS (GS for Windows and macOS, FS for Linux and possibly the other Unix derivatives).
 
