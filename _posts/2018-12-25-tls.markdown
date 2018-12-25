@@ -1,6 +1,6 @@
 ---
 layout: post
-comments: false
+comments: true
 toc: true
 title: "A Deep dive into (implicit) Thread Local Storage"
 date: 2018-12-25
