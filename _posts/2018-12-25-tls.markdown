@@ -58,7 +58,7 @@ It looks like, at least in this case, disassembling the code gives us more myste
 
 While some other CPU architectures have dedicated register to hold thread specific context (whatever that means), x86 enjoys no such luxury. Infamously only having small number of general purpose registers, x86 requires programmers to be very prudent when it comes to planning register uses.
 
-Intel 80386 introduced FS and GS as user defined segment registers without stipulating what they are for. However later with the rise of multithreaded programming, people saw an opportunity in repurposing FS and GS and started to use them as thread register.
+Intel 80386 introduced FS and GS as user defined segment registers without stipulating what they were for. However later with the rise of multithreaded programming, people saw an opportunity in repurposing FS and GS and started to use them as thread register.
 
 Note that this is x86 specific, and we won't go into the details of [memory segmentation](https://en.wikipedia.org/wiki/X86_memory_segmentation), but suffice to say that on x86-64, non-kernel programs make use of FS or GS segment register to access per thread context including TLS (GS for Windows and macOS, FS for Linux and possibly the other Unix derivatives).
 
@@ -678,7 +678,7 @@ Finally our journey has come to a well deserved stop, but it has certainly not r
 But at this point the readers should be well equipped to find out themselves!
 
 ----
-[^extensions]: Almost all C/C++ (before C++11) provide implicit TLS as part of their compiler extensions.
+[^extensions]: Almost all C/C++ (before C++11) compilers provide implicit TLS as part of their extensions.
 [^gdt]: For 32-bit, FS and GS are controlled by [Global Descriptor Table](https://en.wikipedia.org/wiki/Global_Descriptor_Table).
 [^main1]: Ignore executables that don't use TLS at all.
 [^c-tricks]: In fact, the whole glibc codebase is riddled with overly clever use of C trickeries.
