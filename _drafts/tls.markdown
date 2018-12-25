@@ -2,8 +2,8 @@
 layout: post
 comments: false
 toc: true
-title: "A Deep dive into (implicit) Thread Local Storage - Part 1"
-date: 2018-12-7
+title: "A Deep dive into (implicit) Thread Local Storage"
+date: 2018-12-25
 ---
 
 Thread Local Storage (henceforth TLS) is pretty cool, it may appear to be simple at first glance but a good and efficient TLS implementation requires concerted effort from compiler, linker, dynamic linker, kernel, and language runtime.
@@ -21,7 +21,7 @@ Buckle up, it's a long ride!
 
 Ordinary explicit TLS (with the help of `pthread_key_create`, `pthread_setspecific`, and `pthread_getspecific`) is pretty easy to reason about, it can be thought of as some kind of two dimensional hash map: `tls_map[tid][key]`, where `tid` is thread ID, and `key` is the hash map key to a particular thread local variable.
 
-However, implicit TLS, like the one shown in the following C code, seems a bit more magical, its usage is a little too easy, makes you wonder if there's some sleight of hand going on to make this happen.
+However, implicit TLS[^extensions], like the one shown in the following C code, seems a bit more magical, its usage is a little too easy, makes you wonder if there's some sleight of hand going on to make this happen.
 
 ```c
 #include <stdio.h>
@@ -58,9 +58,9 @@ It looks like, at least in this case, disassembling the code gives us more myste
 
 While some other CPU architectures have dedicated register to hold thread specific context (whatever that means), x86 enjoys no such luxury. Infamously only having small number of general purpose registers, x86 requires programmers to be very prudent when it comes to planning register uses.
 
-Intel introduced FS and GS as user defined segment registers without stipulating what they are for. But later with the rise of multithreaded programming, people saw an opportunity in repurposing FS and GS and started to use them as thread register.
+Intel 80386 introduced FS and GS as user defined segment registers without stipulating what they are for. However later with the rise of multithreaded programming, people saw an opportunity in repurposing FS and GS and started to use them as thread register.
 
-Note that this is x86 specific, and we won't go into the details of [memory segmentation](https://en.wikipedia.org/wiki/X86_memory_segmentation), but suffice to say that on x86-64, non-kernel programs make use of FS or GS segment register to store TLS (GS for Windows and macOS, FS for Linux and possibly the other Unix derivatives).
+Note that this is x86 specific, and we won't go into the details of [memory segmentation](https://en.wikipedia.org/wiki/X86_memory_segmentation), but suffice to say that on x86-64, non-kernel programs make use of FS or GS segment register to access per thread context including TLS (GS for Windows and macOS, FS for Linux and possibly the other Unix derivatives).
 
 Now armed with the knowledge that `%fs` is most likely pointing to some sort of thread specific context, let's try again to decode the instruction `mov %fs:0xfffffffffffffffc,%eax`. This `mov` instruction uses segmentation addressing, the large constant `0xfffffffffffffffc` is just -4 in two's complement form. `%fs:0xfffffffffffffffc` just means:
 
@@ -76,11 +76,11 @@ Where `thread_context_ptr` is whatever the address `%fs` points to. For other ar
 After the execution, the register EAX contains the value of `main_tls_var`.
 
 
-On x86-64, user land programs (Ring 3) can retrieve FS and GS, but they are not allowed to change the addresses stored in FS and GS. It's typically the operating systems' job to provide facility to manipulate them indirectly.
+On x86-64, user land programs ([Ring 3](https://en.wikipedia.org/wiki/Protection_ring)) can retrieve FS and GS, but they are not allowed to change the addresses stored in FS and GS. It's typically the operating systems' job (Ring 1) to provide facility to manipulate them indirectly.
 
-On the Linux kernel, the address stored at FS is managed by a [Model Specific Register](https://en.wikipedia.org/wiki/Model-specific_register) called [`MSR_FS_BASE`](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/include/asm/msr-index.h#L18)[^gdt]. The kernel provides a syscall [`arch_prctl`](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/kernel/process_64.c#L627) with which user land programs can use to change FS and GS for the currently running thread.
+On the x86-64 kernel, the address stored at FS is managed by a [Model Specific Register](https://en.wikipedia.org/wiki/Model-specific_register) (MSR) called [`MSR_FS_BASE`](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/include/asm/msr-index.h#L18)[^gdt]. The kernel provides a syscall [`arch_prctl`](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/kernel/process_64.c#L627) with which user land programs can use to change FS and GS for the currently running thread.
 
-It can also be seen that when the kernel does [context switch](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/kernel/process_64.c#L418), the switch code [loads](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/kernel/process_64.c#L476) the next task's FS to the [CPU](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/kernel/process_64.c#L277).
+Digging around a bit more, it can also be seen that when the kernel does [context switch](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/kernel/process_64.c#L418), the switch code [loads](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/kernel/process_64.c#L476) the next task's FS to the [CPU's MSR](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/kernel/process_64.c#L277). Confirming that whatever FS points to is on a per thread/task basis.
 
 Based on what we've known so far, we may have this hypothesis that the runtime must be using some form of FS manipulation routine (such as `arch_prctl`) to bind the TLS to the current thread. And the kernel keeps track of this binding by swap in the right FS value when doing context switch.
 
@@ -88,7 +88,7 @@ Based on what we've known so far, we may have this hypothesis that the runtime m
 
 So far we've been hand waving the term thread specific context, so what really is this context thing?
 
-Different platforms have different names for it, for Linux and glibc this is called Thread Control Block (TCB), on Windows it's called [Thread Information Block](https://en.wikipedia.org/wiki/Win32_Thread_Information_Block) (TIB) or Thread Environment Block (TEB).
+Different platforms have different names for it, for Linux and glibc, this is called Thread Control Block (TCB), on Windows it's called [Thread Information Block](https://en.wikipedia.org/wiki/Win32_Thread_Information_Block) (TIB) or Thread Environment Block (TEB).
 
 We will focus on TCB in this post, for more information about TIB/TEB, see the first part of Ken Johnson's excellent [blog series](http://www.nynaeve.net/?p=180) on Windows TLS.
 
@@ -106,19 +106,19 @@ As it turns out, TCB or TLS setup is done somewhat differently for statically li
 
 Adding more complication to the mix, TLS is also initialised differently for the main thread and the other threads that begin later in the execution. It makes sense if you stop and think about it, as the main thread is spawned by the kernel, whereas the start of non-main threads are triggered later by the programs.
 
-When it comes to dynamically linked ELF programs, it's useful to know that once they are loaded and mapped into memory, the kernel would then take its hands off and pass the execution baton to the dynamic linker (ld.so on Linux, dyld on macOS).
+When it comes to dynamically linked ELF programs, it's useful to know that once they are loaded and mapped into memory, the kernel would then take its hands off and pass the execution baton to the dynamic linker (_ld.so_ on Linux, _dyld_ on macOS).
 
-Since ld.so is part of glibc, the next step is to open up the guts of glibc and fish around to see if we can dig up anything juicy, but where to look?
+Since _ld.so_ is part of glibc, the next step is to open up the guts of glibc and fish around to see if we can dig up anything juicy, but where to look?
 
 Remembering the hypothesis we made earlier about the runtime would use `arch_prctl` to change FS register, let's grep the glibc source for `arch_prctl` then.
 
-After going through several false positive hits, we arrive at a macro definition [`TLS_INIT_TP`](https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/x86_64/nptl/tls.h;h=e88561c93412489e532af8e388a8eeb1f879b771;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l154), which uses inline assembly to trigger `arch_prctl` syscall directly and is responsible for updating the FS register to point to TCB.
+After wading through several false positive hits, we arrive at a macro definition [`TLS_INIT_TP`](https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/x86_64/nptl/tls.h;h=e88561c93412489e532af8e388a8eeb1f879b771;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l154), which uses inline assembly to trigger `arch_prctl` syscall directly and is responsible for updating the FS register to point to TCB.
 
 With this macro as an anchor and generous use of grep, it starts to become clear that the main thread's TLS is setup in the function [`init_tls`](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/rtld.c;h=1b0c74739f967093d26f5867b9b9d552d8b1ad00;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l681), which calls [`_dl_allocate_tls_storage`](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/rtld.c;h=1b0c74739f967093d26f5867b9b9d552d8b1ad00;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l731) to allocate the TCB or `struct pthread`, eventually [invokes](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/rtld.c;h=1b0c74739f967093d26f5867b9b9d552d8b1ad00;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l740) the aforementioned macro `TLS_INIT_TP` to bind the `pthread` TCB to the main thread.
 
 This finding confirms our previous hypothesis that the dynamic linker runtime allocates and sets up the TCB or `struct pthread` and then uses `arch_prctl` to bind the TLS to at least the main thread.
 
-We will look at how TLS is setup in the other threads later, before that there's still this glaring question that we've been ignoring til now: Where does that mysterious -4 come from?
+We will look at how TLS is setup in the other threads later, before that there's still this glaring question that we've been ignoring till now: Where does that mysterious -4 come from?
 
 ## The Internals of ELF TLS
 
@@ -132,25 +132,25 @@ Despite its simplicity, the diagram actually packs quite a lot of information, l
 
 _tp<sub>t</sub>_ is the thread register aka thread pointer (i.e. what FS points to) for thread _t_, and _dtv<sub>t</sub>_ is Dynamic Thread Vector which can be thought of as a two dimensional array that can address any TLS variable by [a module ID and a TLS variable offset](https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/x86_64/dl-tls.h;h=bc18e70b23f03fb9ce59b647b76f0c36e7e27afa;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l24). A TLS variable offset is local within a module and bound to each TLS variable at compile time. A module in glibc can refer to either an executable or a dynamically shared object, a module ID therefore is an index number for a loaded ELF object in a process.
 
-Note that for a given running process the module ID for the main executable [will always be 1](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/rtld.c;h=1b0c74739f967093d26f5867b9b9d552d8b1ad00;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l1232), whereas the shared objects don't know their module IDs until they are loaded and [assigned by the linker](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-load.c;h=c51e4b3718ef68915d6d80356fa5caade7ef3019;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l1133) (ignoring executables that don't use TLS at all).
+Note that for a given running process the module ID for the main executable [will always be 1](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/rtld.c;h=1b0c74739f967093d26f5867b9b9d552d8b1ad00;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l1232), whereas the shared objects don't know their module IDs until they are loaded and [assigned](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-load.c;h=c51e4b3718ef68915d6d80356fa5caade7ef3019;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l1133) by the linker[^main1].
 
 As for _dtv<sub>t,1</sub>_, _dtv<sub>t,2</sub>_, etc, each of them contains TLS information for a loaded shared object (with module ID 1, 2, etc...) and points to a _TLS block_ that contains the TLS variables within a particular dynamic object. A specific TLS variable can be extracted out of this TLS block if its offset is given.
 
 You might have noticed that the first few elements for the DTV array point to the white portion before the TCB, whereas the last couple point to the other TLS blocks labeled for _Dynamically-Loaded Modules_. Dynamically-loaded modules here don't mean _any_ dynamic shared objects, they only refer to the shared objects that are loaded by explicitly calling `dlopen`.
 
-The white portion before the shaded TCB can be subdivided into TLS blocks (one block corresponds to one loaded module), containing all the TLS variables from the executable and the shared objects that are loaded before the start of the `main()` function. This portion is called _static TLS_ in glibc parlance, they are called "static" to distinguish them from the TLS for modules loaded via `dlopen`.
+The white portion before the shaded TCB can be subdivided into TLS blocks (one block corresponds to one loaded module, delineated with _tlsoffset<sub>1</sub>_, _tlsoffset<sub>2</sub>_, etc..), containing all the TLS variables from the executable and the shared objects that are loaded before the start of the `main()` function. This portion is called _static TLS_ in glibc parlance, they are called "static" to distinguish them from the TLS for modules loaded via `dlopen`.
 
-The TLS variables for these "static" modules (i.e. `DT_NDEEDED` entries) are reachable by a negative constant offset (constant through out the lifetime of the running process) from the thread register. For example, the instruction `mov %fs:0xfffffffffffffffc` falls under this category.
+The TLS variables for these "static" modules (i.e. `DT_NEEDED` entries) are reachable by a negative constant offset (constant through out the lifetime of the running process) from the thread register. For example, the instruction `mov %fs:0xfffffffffffffffc` falls under this category.
 
-Since the module ID for the executable itself is always 1, _dtv<sub>t,1</sub>_ (i.e. `dtv[1]`) always points to the TLS block of the executable itself (module id 1). As it can be seen from the diagram, the linker will places the executable's TLS block right next to the TCB, presumably to keep the executable's TLS variables relatively hot in the cache.
+Since the module ID for the executable itself is always 1, _dtv<sub>t,1</sub>_ (i.e. `dtv[1]`) always points to the TLS block of the executable itself (module id 1). Additionally, as it can be seen from the diagram, the linker will also always place the executable's TLS block right next to the TCB, presumably to keep the executable's TLS variables in a predictable location and relatively hot in the cache.
 
 The _dtv<sub>t</sub>_ is a [member variable](https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/x86_64/nptl/tls.h;h=e88561c93412489e532af8e388a8eeb1f879b771;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l46) of `tcbheader_t`, which in turn is [first member variable](https://sourceware.org/git/?p=glibc.git;a=blob;f=nptl/descr.h;h=9c01e1b9863b178c174508b78c7772e71ffdc5ba;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l127) of TCB `pthread`.
 
 DTV has a deceptively [simple data structure](https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/generic/dl-dtv.h;h=b2346b2b65b272a99ee3b3c1aac36e9af363cc18;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l29), but it's an unfortunate victim of many C trickeries[^c-tricks] (e.g. negative pointer arithmetics, type aliasing, badly named member variables, etc...).
 
-The first element of the `dtv` array in TCB is a generation counter _gen<sub>t</sub>_, which serves as a version number. It helps inform the runtime when a resizing or reconstruction of the DTV is needed. Every time when the program calls `dlopen` or `dlfree`, the global generation will get [incremented](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-open.c;h=f6c8ef1043b9a6cf90419db0f536445389764b7d;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l468). Whenever the runtime detects a use of a DVT and its _gen<sub>t</sub>_ [doesn't match](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-tls.c;h=c87caf13d6a97ba4981c5ddaba2ecec21f4753b0;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l828) the global generation number, the DTV will be [updated again](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-tls.c;h=c87caf13d6a97ba4981c5ddaba2ecec21f4753b0;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l622), its _gen<sub>t</sub>_ will be [set to the current global generation number](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-tls.c;h=c87caf13d6a97ba4981c5ddaba2ecec21f4753b0;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l726).
+The first element of the `dtv` array in TCB is a generation counter _gen<sub>t</sub>_, which serves as a version number. It helps inform the runtime when a resizing or reconstruction of the DTV is needed. Every time when the program does `dlopen` or `dlfree`, the global generation counter will get [incremented](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-open.c;h=f6c8ef1043b9a6cf90419db0f536445389764b7d;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l468). Whenever the runtime detects a use of a DVT and its _gen<sub>t</sub>_ [doesn't match](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-tls.c;h=c87caf13d6a97ba4981c5ddaba2ecec21f4753b0;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l828) the global generation number, the DTV will be [updated again](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-tls.c;h=c87caf13d6a97ba4981c5ddaba2ecec21f4753b0;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l622), its _gen<sub>t</sub>_ will be [set to the current global generation number](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-tls.c;h=c87caf13d6a97ba4981c5ddaba2ecec21f4753b0;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l726).
 
-The second element of `dtv` is pointing to the main executable's TLS block right next to the TCB in the static TLS.
+As we touched on above, the second element of `dtv` (i.e. `dtv[1]`) is pointing to the main executable's TLS block right next to the TCB in the static TLS.
 
 The following is the quick overview of the `dtv` array:
 
@@ -163,19 +163,19 @@ dtv[1].pointer;  /* Pointer to the main executable TLS block in this thread */
 main_tls_var = *(dtv[tls_index.ti_module].pointer + tls_index.ti_offset);
 ```
 
-One property of this static TLS and DTV configuration is that any _static_ TLS variable in a particular thread is reachable _either_ via the thread's DTV `dtv[ti_module].pointer + ti_offset`, or by a negative offset from the TCB (e.g. `mov %fs:0xffffffffffxxxxxx %eax`, where `0xffffffffffxxxxxx` is the negative offset).
+One property of this static TLS and DTV configuration is that any variable in _static TLS_ in a particular thread is reachable _either_ via the thread's DTV `dtv[ti_module].pointer + ti_offset`, or by a negative offset from the TCB (e.g. `mov %fs:0xffffffffffxxxxxx %eax`, where `0xffffffffffxxxxxx` is the negative offset).
 
 It's important to note that using DTV `dtv[ti_module].pointer + ti_offset` is the most general way to access TLS variables regardless if the variables reside in _static_ TLS or _dynamic_ TLS. We will see why this is relevant later.
 
 ## The Initialisation of DTV and static TLS
 
-So far we've journeyed from assembly, to kernel, and to dynamic linker, we've covered a lot of ground, and it looks like we are getting closer to the understanding of the weird `mov` instruction, but the questions still remains: how is the static TLS constructed, and where does the -4 or 0xfffffffffffffffc come from?
+So far we've journeyed from assembly, to kernel, and to dynamic linker, we've covered a lot of ground, and it looks like we are getting closer to the understanding of the weird `mov` instruction, but the questions still remain: how is the static TLS constructed, and where does the -4 or 0xfffffffffffffffc come from?
 
 We'll explore the static TLS now and find out what the fuzz is all about the -4.
 
 As part of its bookkeeping, the dynamic linker maintains an (intrusive) link list [`link_map`](https://sourceware.org/git/?p=glibc.git;a=blob;f=include/link.h;h=5924594548e7ef820595217e7714f7994c533ec1;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l83), which keeps track of all the loaded modules and their metadata. 
 
-After the linker is done mapping the modules into the program's address space, it would call [`init_tls`](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/rtld.c;h=1b0c74739f967093d26f5867b9b9d552d8b1ad00;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l681), where it would use the `link_map` to fill in the information for `dl_tls_dtv_slotinfo_list`, another global linked list that contains the metadata for modules that make use of TLS variables. It then proceeds to call `_dl_determine_tlsoffset`, which lets each loaded module [know](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-tls.c;h=c87caf13d6a97ba4981c5ddaba2ecec21f4753b0;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l243) at what [offset](https://sourceware.org/git/?p=glibc.git;a=blob;f=include/link.h;h=5924594548e7ef820595217e7714f7994c533ec1;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l308) (`l_tls_offset`) in the static TLS it should place the module's TLS block. Later on the function calls `_dl_allocate_tls_storage` to allocate (but not initialise) the static TLS and DTV.
+After the linker is done mapping the modules into the program's address space, it would call [`init_tls`](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/rtld.c;h=1b0c74739f967093d26f5867b9b9d552d8b1ad00;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l681), where it would use the `link_map` to [fill in](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/rtld.c;h=1b0c74739f967093d26f5867b9b9d552d8b1ad00;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l715) the information for `dl_tls_dtv_slotinfo_list`; another global linked list that contains the metadata for modules that make use of TLS. It then proceeds to call `_dl_determine_tlsoffset`, which lets each loaded module [know](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-tls.c;h=c87caf13d6a97ba4981c5ddaba2ecec21f4753b0;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l243) at what [offset](https://sourceware.org/git/?p=glibc.git;a=blob;f=include/link.h;h=5924594548e7ef820595217e7714f7994c533ec1;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l308) (`l_tls_offset`) in the static TLS it should place the module's TLS block. Later on the function calls `_dl_allocate_tls_storage` to allocate (but not initialise) the static TLS and DTV.
 
 Further along in the dynamic linker setup process, `_dl_allocate_tls_init` will be called to finally initialise the static TLS and DTV for the main thread.
 
@@ -254,7 +254,7 @@ The first part of the function does a sanity check for the size of DTV array, wh
 
 Here it goes, this is how TLS and DTV are setup! But who decides the -4 or `0xfffffffffffffffc` is the right offset to get to our TLS variable `main_tls_var`?
 
-The answer lies in the rule we touched on in the previous section: the main executable's TLS block is always placed right before the TCB. Essentially the compiler and the dynamic linker conspire together to come up with that number, because the TLS block and TLS offset are both known ahead of time.
+The answer lies in the rule we touched on in the previous section: the main executable's TLS block is always placed right before the TCB. Essentially the compiler and the dynamic linker conspire together to come up with that number, because the executable's TLS block and TLS offset are both known ahead of time.
 
 The cooperation relies on the compiler knowing the following "facts" at build time, and the dynamic linker guaranteeing these "facts" are true at runtime:
 * The FS register points to the TCB
@@ -336,17 +336,17 @@ The immediate question is why we can't use a constant offset to reference `foo_t
 
 The reason why the offset is constant for the _first_ case is due to the fact the compiler knows ahead of time both the variable's offset _and_ the position of the executable's TLS block. Whereas for case 2, the compiler only has partial knowledge.
 
-The compiler knows that the TLS variable will be located somewhere within the _static TLS_. Because the compiler knows `foo_tls` is externally defined and it also knows it's defined in _libfoo.so_ which is one of the direct library dependencies of the executable _main_. Remember static TLS contains TLS variables defined in the executable and shared objects that get loaded before the executable's `main` function is reached.
+The compiler knows that the TLS variable will be located somewhere within the _static TLS_. Because the compiler knows `foo_tls` is externally defined and it also knows it's defined in _libfoo.so_ which is one of the direct library dependencies of the executable _main_. Remember static TLS contains TLS variables defined in the executable _and_ shared objects that get loaded before the executable's `main` function is reached.
 
-So the compiler knows `foo_tls` is in the static TLS, it just doesn't know its precise offset within the static TLS (or its offset from the TCB).
+So the compiler knows `foo_tls` is in the static TLS, it just doesn't know its precise offset within the static TLS (or its offset from the TCB). As unlike executables, the dynamic linker doesn't provide any guarantee for the order (therefore their module IDs) in which shared objects get loaded.
 
 To bridge this gap, some form of runtime mechanism is necessary. This is where the mysterious `0x200fd8` comes into play.
 
 In order to delving deeper into this _mechanism_, we'll need to know about [relocation](https://en.wikipedia.org/wiki/Relocation_(computing)). Eli Bendersky has written [some](https://eli.thegreenplace.net/2011/08/25/load-time-relocation-of-shared-libraries/) [good](https://eli.thegreenplace.net/2011/11/03/position-independent-code-pic-in-shared-libraries/) [articles](https://eli.thegreenplace.net/2011/11/11/position-independent-code-pic-in-shared-libraries-on-x64) about ELF relocation. It's recommended to have basic understanding of why relocation is needed and how it works before reading further.
 
-However if you are really brimming over with patience-defying curiosity _right now_ and so eager to soldier on without reading about relocation, an extremely simplified explanation goes like this: Relocation is required because the compiler doesn't know where the variables defined in shared objects are located at runtime, so a [Global Offset Table](https://en.wikipedia.org/wiki/Global_Offset_Table) (GOT) is set aside by the compiler and only gets filled in the appropriate offset values at runtime by the dynamic linker.
+However if you are really brimming over with patience-defying curiosity _right now_ and so eager to soldier on without reading about relocation, an extremely simplified explanation goes like this: Relocation is required because the compiler doesn't know where the variables defined in shared objects are located at runtime, so a [Global Offset Table](https://en.wikipedia.org/wiki/Global_Offset_Table) (GOT) is set aside by the compiler and only gets filled in the appropriate location values at runtime by the dynamic linker.
 
-Tying back to our discussion about the `foo_tls` offset, because the compiler doesn't know what the externally defined TLS variable `foo_tls`'s offset in static TLS is, it creates an entry in the global offset table leaving a [note](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/elf.h;h=7e2b072a7f75451c0faeb47013b6b93c2fc575a2;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l3334) (`R_X86_64_TPOFF64`) about how the offset should be calculated.
+Tying back to our discussion about the `foo_tls` offset, because the compiler doesn't know what the externally defined TLS variable `foo_tls`'s offset in the static TLS is, at build time it creates an entry in the global offset table leaving a [note](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/elf.h;h=7e2b072a7f75451c0faeb47013b6b93c2fc575a2;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l3334) (`R_X86_64_TPOFF64`) about how the offset should be calculated.
 
 Running _readelf_ on our executable to dump its relocation information:
 
@@ -425,9 +425,9 @@ Make sure to compile it without any optimisation or the compiler may optimise ou
 
 This time the code to access `s_bar_tls` looks completely different from before. There's a mention of `.got`, which means an entry in the global offset table (GOT). And most importantly there's a call to [`__tls_get_addr`](https://sourceware.org/git/?p=glibc.git;a=blob;f=elf/dl-tls.c;h=c87caf13d6a97ba4981c5ddaba2ecec21f4753b0;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l823)[^plt].
 
-`lea 0x20094a(%rip),%rdi` moves the value stored in the GOT entry at address `0x200fd0` into the register `%rdi`. According to [x86-64 calling conventions](https://en.wikipedia.org/wiki/X86_calling_conventions#System_V_AMD64_ABI), `%rdi` is used to pass the first argument of a function call.
+`lea 0x20094a(%rip),%rdi` literally just assigns `0x200fd0` (the address of the GOT entry, i.e. a pointer) into the register `%rdi`. According to [x86-64 calling conventions](https://en.wikipedia.org/wiki/X86_calling_conventions#System_V_AMD64_ABI), `%rdi` is used to pass the first argument of a function call.
 
-See following for the body of the function with some macros expanded:
+See following for the body of the function `__tls_get_addr` with some macros expanded:
 
 ```c
 void *
@@ -449,7 +449,7 @@ __tls_get_addr (tls_index *ti)
 
 You may have noticed the similarity of this function and what we talked earlier about using DTV `dtv[ti_module].pointer + ti_offset` to access any TLS variables. Essentially `__tls_get_addr` does the same thing but with extra checks and code to handle generation upgrade and lazy TLS block allocation.
 
-We know that the `get_bar_tls`'s assembly calls `__tls_get_addr` with a value stored at an entry in the GOT as its argument, but what really is stored in that entry at `0x200fd0`?
+We know that the `get_bar_tls`'s assembly calls `__tls_get_addr` with a pointer to an entry in the GOT as its argument, but what really is stored in that entry at `0x200fd0`?
 
 From the glibc source, we know `__tls_get_addr`'s first argument is [`struct tis_index`](https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/x86_64/dl-tls.h;h=bc18e70b23f03fb9ce59b647b76f0c36e7e27afa;hb=437faa9675dd916ac7b239d4584b932a11fbb984), so naturally the value at that address must be an instance of that `struct`?
 
@@ -632,7 +632,7 @@ So for this case, each TLS variable requires _two_ relocation steps to fill in e
 
 This concludes the four cases of TLS variable usage. At this point you might want to ask why the complexity? The simplest and the most general way of accessing TLS variables is to use `__tls_get_addr`, but in order to achieve fastest speed for a given condition glibc designers decided to sacrifice simplicity for performance.
 
-Certainly accessing TLS variables via thread register (FS) is _perceived_ to be faster (single memory fetch and more cache friendly) than `__tls_get_addr`, therefore if the speed of accessing TLS is important to your applications, try to place and use them in the executables when possible. If not, at least try to use them in executables where the variables will at least be in the static TLS. But of course profile first before sacrificing your program architecture.
+Certainly accessing TLS variables via thread register (FS) is _perceived_ to be faster (single memory fetch and more cache friendly) than `__tls_get_addr`, therefore if the speed of accessing TLS is important to your applications, try to place and use them in the executables when possible. If not, at least try to use them in executables where the variables will at least be in the static TLS. But of course profile first before changing your program architecture.
 
 
 ## The Initialisation of TCB or TLS in Non-main Threads
@@ -641,7 +641,7 @@ The TCB and TLS is setup slightly differently for non-main threads. When using `
 
 The [`allocate_stack`](https://sourceware.org/git/?p=glibc.git;a=blob;f=nptl/allocatestack.c;h=04e3f08465ed9982be98535ca6d81d6784d9eb4b;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l407) routine first [checks](https://sourceware.org/git/?p=glibc.git;a=blob;f=nptl/allocatestack.c;h=04e3f08465ed9982be98535ca6d81d6784d9eb4b;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l546) if there's an already cached stack lying around (i.e. old stacks that can be freed after `pthread_exit`), then allocate a new one if no appropriate stack is in cache.
 
-One interesting tidbit is that after getting hold of a stack, the routine will initialise the [static TLS](https://sourceware.org/git/?p=glibc.git;a=blob;f=nptl/allocatestack.c;h=04e3f08465ed9982be98535ca6d81d6784d9eb4b;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l470), [TCB](https://sourceware.org/git/?p=glibc.git;a=blob;f=nptl/allocatestack.c;h=04e3f08465ed9982be98535ca6d81d6784d9eb4b;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l573) in place on the stack! So unlike the main thread where TCB and static TLS are heap allocated, the non-main threads just use the stack to house the TLS save an extra memory allocation.
+One interesting tidbit is that after getting hold of a stack, the routine will initialise the [static TLS](https://sourceware.org/git/?p=glibc.git;a=blob;f=nptl/allocatestack.c;h=04e3f08465ed9982be98535ca6d81d6784d9eb4b;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l470), [TCB](https://sourceware.org/git/?p=glibc.git;a=blob;f=nptl/allocatestack.c;h=04e3f08465ed9982be98535ca6d81d6784d9eb4b;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l573) in place on the stack! So unlike the main thread where TCB and static TLS are heap allocated, the non-main threads just use the stack to house the TLS, saving an extra memory allocation.
 
 After the stack and TLS have been setup properly, `pthread_create` [invokes](https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/unix/sysv/linux/createthread.c;h=5879e51bd26f5392c0abebbed97e83d00ab77793;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l93) the [`clone`](http://man7.org/linux/man-pages/man2/clone.2.html) syscall:
 
@@ -666,12 +666,21 @@ Cracking open [`clone`](https://elixir.bootlin.com/linux/v4.18.20/source/kernel/
 
 Following along the parameter `tls` takes us from `_do_fork`, to [`copy_process`](https://elixir.bootlin.com/linux/v4.18.20/source/kernel/fork.c#L1605), to [`copy_thread_tls`](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/kernel/process_64.c#L289), which eventually [binds](https://elixir.bootlin.com/linux/v4.18.20/source/arch/x86/kernel/process_64.c#L349) `tls` to the thread's FS register.
 
-## To Be Continued
+## Conclusion
 
-Finally The journey comes to a well deserved stop, but it has not finished. In the next post, we will take a look at C++'s `thread_local`, TLS implementation on macOS and more!
+Finally our journey has come to a well deserved stop, but it has certainly not reached its final destinations. There are still many details left for us to explore:
+
+* How TLS in statically linked executables [works](https://sourceware.org/git/?p=glibc.git;a=blob;f=csu/libc-tls.c;h=28a79441cde379f7079fb2d01702308543f54ebd;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l106)?
+* Why the compiler also uses FG to access [stack guard/canary/protector](https://sourceware.org/git/?p=glibc.git;a=blob;f=sysdeps/x86_64/nptl/tls.h;h=e88561c93412489e532af8e388a8eeb1f879b771;hb=437faa9675dd916ac7b239d4584b932a11fbb984#l51)?
+* C++ 11's `thread_local`
+* macOS's [`TLVDescriptor`](https://opensource.apple.com/source/dyld/dyld-635.2/src/threadLocalVariables.c.auto.html)
+
+But at this point the readers should be well equipped to find out themselves!
 
 ----
+[^extensions]: Almost all C/C++ (before C++11) provide implicit TLS as part of their compiler extensions.
 [^gdt]: For 32-bit, FS and GS are controlled by [Global Descriptor Table](https://en.wikipedia.org/wiki/Global_Descriptor_Table).
+[^main1]: Ignore executables that don't use TLS at all.
 [^c-tricks]: In fact, the whole glibc codebase is riddled with overly clever use of C trickeries.
 [^pie]: The concept of PIC and PIE is beyond the scope of this post.
 [^plt]: We'll ignore the discussion of Procedure Linkage Table (PLT) in this post.
